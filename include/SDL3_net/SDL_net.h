@@ -30,8 +30,7 @@
 #ifndef SDL_NET_H_
 #define SDL_NET_H_
 
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_begin_code.h>
+#include <SDL2/SDL.h>
 
 /* Set up for C function definitions, even when using C++ */
 #ifdef __cplusplus
@@ -76,7 +75,7 @@ extern "C" {
  *
  * \since This function is available since SDL_Net 3.0.0.
  */
-extern DECLSPEC const SDL_Version * SDLCALL SDLNet_LinkedVersion(void);
+extern DECLSPEC const SDL_version * SDLCALL SDLNet_LinkedVersion(void);
 
 
 /* init/quit functions... */
@@ -1255,7 +1254,6 @@ extern DECLSPEC int SDLCALL SDLNet_WaitUntilInputAvailable(void **vsockets, int 
 #ifdef __cplusplus
 }
 #endif
-#include <SDL3/SDL_close_code.h>
 
 #endif /* SDL_NET_H_ */
 

@@ -86,9 +86,9 @@ typedef enum SDLNet_SocketType
 } SDLNet_SocketType;
 
 
-const SDL_Version *SDLNet_LinkedVersion(void)
+const SDL_version *SDLNet_LinkedVersion(void)
 {
-    static const SDL_Version linked_version = {
+    static const SDL_version linked_version = {
         SDL_NET_MAJOR_VERSION, SDL_NET_MINOR_VERSION, SDL_NET_PATCHLEVEL
     };
     return &linked_version;
@@ -99,8 +99,8 @@ struct SDLNet_Address
     char *hostname;
     char *human_readable;
     char *errstr;
-    SDL_AtomicInt refcount;
-    SDL_AtomicInt status;  // 0==in progress, 1==resolved, -1==error
+    SDL_atomic_t refcount;
+    SDL_atomic_t status;  // 0==in progress, 1==resolved, -1==error
     struct addrinfo *ainfo;
     SDLNet_Address *resolver_next;  // a linked list for the resolution job queue.
 };
@@ -110,12 +110,12 @@ struct SDLNet_Address
 
 static SDLNet_Address *resolver_queue = NULL;
 static SDL_Thread *resolver_threads[MAX_RESOLVER_THREADS];
-static SDL_Mutex *resolver_lock = NULL;
-static SDL_Condition *resolver_condition = NULL;
-static SDL_AtomicInt resolver_shutdown;
-static SDL_AtomicInt resolver_num_threads;
-static SDL_AtomicInt resolver_num_requests;
-static SDL_AtomicInt resolver_percent_loss;
+static SDL_mutex *resolver_lock = NULL;
+static SDL_cond *resolver_condition = NULL;
+static SDL_atomic_t resolver_shutdown;
+static SDL_atomic_t resolver_num_threads;
+static SDL_atomic_t resolver_num_requests;
+static SDL_atomic_t resolver_percent_loss;
 
 // I really want an SDL_random().  :(
 static int random_seed = 0;
@@ -252,7 +252,7 @@ static int SDLCALL ResolverThread(void *data)
             }
 
             // Block until there's something to do.
-            SDL_WaitCondition(resolver_condition, resolver_lock);  // surrenders the lock, sleeps until alerted, then relocks.
+            SDL_CondWait(resolver_condition, resolver_lock);  // surrenders the lock, sleeps until alerted, then relocks.
             continue;  // check for shutdown and new work again!
         }
 
@@ -285,7 +285,7 @@ static int SDLCALL ResolverThread(void *data)
 
         // okay, we're done with this task, grab the lock so we can see what's next.
         SDL_LockMutex(resolver_lock);
-        SDL_BroadcastCondition(resolver_condition);  // wake up anything waiting on results, and also give all resolver threads a chance to see if they are still needed.
+        SDL_CondBroadcast(resolver_condition);  // wake up anything waiting on results, and also give all resolver threads a chance to see if they are still needed.
     }
 
     SDL_AtomicAdd(&resolver_num_threads, -1);
@@ -363,7 +363,7 @@ static SDLNet_Address *CreateSDLNetAddrFromSockAddr(struct sockaddr *saddr, Sock
     return SDLNet_RefAddress(addr);
 }
 
-static SDL_AtomicInt initialize_count;
+static SDL_atomic_t initialize_count;
 
 int SDLNet_Init(void)
 {
@@ -394,7 +394,7 @@ int SDLNet_Init(void)
         goto failed;
     }
 
-    resolver_condition = SDL_CreateCondition();
+    resolver_condition = SDL_CreateCond();
     if (!resolver_condition) {
         goto failed;
     }
@@ -437,7 +437,7 @@ void SDLNet_Quit(void)
         SDL_AtomicSet(&resolver_shutdown, 1);
         for (int i = 0; i < ((int) SDL_arraysize(resolver_threads)); i++) {
             if (resolver_threads[i]) {
-                SDL_BroadcastCondition(resolver_condition);
+                SDL_CondBroadcast(resolver_condition);
                 SDL_UnlockMutex(resolver_lock);
                 SDL_WaitThread(resolver_threads[i], NULL);
                 SDL_LockMutex(resolver_lock);
@@ -453,7 +453,7 @@ void SDLNet_Quit(void)
     SDL_AtomicSet(&resolver_percent_loss, 0);
 
     if (resolver_condition) {
-        SDL_DestroyCondition(resolver_condition);
+        SDL_DestroyCond(resolver_condition);
         resolver_condition = NULL;
     }
 
@@ -505,7 +505,7 @@ SDLNet_Address *SDLNet_ResolveHostname(const char *host)
         }
     }
 
-    SDL_SignalCondition(resolver_condition);
+    SDL_CondSignal(resolver_condition);
     SDL_UnlockMutex(resolver_lock);
 
     return addr;
@@ -523,7 +523,7 @@ int SDLNet_WaitUntilResolved(SDLNet_Address *addr, Sint32 timeout)
         SDL_LockMutex(resolver_lock);
         if (timeout < 0) {
             while (SDL_AtomicGet(&addr->status) == 0) {
-                SDL_WaitCondition(resolver_condition, resolver_lock);
+                SDL_CondWait(resolver_condition, resolver_lock);
             }
         } else {
             const Uint64 endtime = (SDL_GetTicks() + timeout);
@@ -533,7 +533,7 @@ int SDLNet_WaitUntilResolved(SDLNet_Address *addr, Sint32 timeout)
                 if (now >= endtime) {
                     break;
                 }
-                SDL_WaitConditionTimeout(resolver_condition, resolver_lock, (Uint64) (endtime - now));
+                SDL_CondWaitTimeout(resolver_condition, resolver_lock, (Uint64) (endtime - now));
             }
         }
         SDL_UnlockMutex(resolver_lock);
